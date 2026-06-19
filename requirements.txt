@@ -1,0 +1,38 @@
+# Core Dependencies for aicomp_sdk and Jupyter Notebook
+# Python 3.11+ required
+
+# ML & LLM Framework
+torch>=2.0.0
+transformers>=4.30.0
+openai>=1.0.0
+huggingface-hub>=0.16.0
+tokenizers>=0.13.0
+
+# Local model support (llama.cpp integration)
+# Note: llama-cpp-python requires compilation; pre-compiled wheels may be needed
+# llama-cpp-python>=0.2.0
+
+# Environment & Agents
+gymnasium<1,>=0.29
+
+# Data & Notebooks
+pandas>=1.3.0
+polars>=0.18.0
+numpy>=1.20.0
+jupyter>=1.0.0
+ipython>=8.0.0
+
+# Protobuf & RPC
+grpcio>=1.53.0
+protobuf>=3.20.0
+
+# Data handling
+pyarrow>=10.0.0
+pydantic>=1.10.0
+
+# Type Checking (Optional but recommended)
+typing-extensions>=4.0.0
+
+# Utilities
+requests>=2.28.0
+
