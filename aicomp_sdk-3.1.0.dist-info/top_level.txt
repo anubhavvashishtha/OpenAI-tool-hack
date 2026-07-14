@@ -1,3 +1,0 @@
-aicomp_sdk
-dist
-fixtures

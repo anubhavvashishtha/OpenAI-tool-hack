@@ -1,0 +1,58 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+.Python
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Competition SDK (installed locally, not source-controlled) ────────────────
+aicomp_sdk/
+aicomp_sdk-*.dist-info/
+kaggle_evaluation/
+
+# ── Build artifacts ────────────────────────────────────────────────────────────
+build/
+dist/
+*.egg-info/
+*.egg
+
+# ── Jupyter / IPython ─────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ── Kaggle submission outputs ─────────────────────────────────────────────────
+submission.csv
+submission_details.json
+submission_*.csv
+
+# ── Generated attack file (built at runtime by the notebook) ──────────────────
+# attack.py   ← uncomment this if you don't want to track the generated file
+
+# ── Secrets / credentials ─────────────────────────────────────────────────────
+.env
+*.env
+kaggle.json
+secrets.json
+
+# ── OS junk ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE / editor ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user
+
+# ── Logs & temp ───────────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
