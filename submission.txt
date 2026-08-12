@@ -1,0 +1,9 @@
+prompts/winners_gpt_3.csv , 13 
+prompts/winners_gpt_7.csv , 2 | prompts\winners_gemma_10.csv  , 2
+prompts\winners_gpt_4.csv , 4 | prompts\winners_gemma_9.csv  , 3
+prompts\winners_gpt_6.csv , 4 | prompts\winners_gemma_1.csv  , 2
+
+
+
+
+result_gpt_4.csv , 14 | result_gemma_10 , 3
