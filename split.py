@@ -1,70 +1,80 @@
 #!/usr/bin/env python3
 """
-split_multishot.py
+split.py
 
-Builds multi-turn "multishot" candidates from sample.py's 40 GPT / 40 Gemma
-templates. Unlike split.py (which picks single final-turn templates in
-attack.py's exact TEMPLATES_GPT/TEMPLATES_GEMMA shape), this produces a
-DIFFERENT variable name (TEMPLATES_GPT_MULTISHOT / TEMPLATES_GEMMA_MULTISHOT)
-where each entry is (name, (turn_1, turn_2, ..., turn_N)) — a tuple of
-ordered turns, each turn still containing the raw {url}/{payload}
-placeholders.
+Extracts top N prompts from multishot CSV files (gpt_oss_multishot_msX_*.csv and
+gemma_multishot_msX_*.csv) and generates .py files with template banks.
 
-This does NOT touch attack.py's own TEMPLATES_GPT/TEMPLATES_GEMMA or its
-SETUP_SEQUENCE_* lists. It's a standalone bank you can wire in yourself
-however your candidate-construction code expects a sequence of turns
-(e.g. AttackCandidate.from_messages(tuple_of_turns)).
+Unlike the old split.py (which sampled randomly from sample.py), this:
+- Reads from the best-performing multishot CSV results
+- Takes the top N prompts (default 10)
+- Parses the JSON prompt candidates from the CSV
+- Generates TEMPLATES_GPT and TEMPLATES_GEMMA in .py format
 
 Usage:
-    python split_multishot.py <multishot_number> <prompt_number> [--seed N]
+    python split.py <multishot_level> [--top N] [--output FILE]
 
-    multishot_number -> how many templates get combined into ONE multi-turn
-                         candidate (sampled without replacement per candidate)
-    prompt_number     -> how many such multi-turn candidates to build
-                          (per model)
-    --seed            -> random seed for reproducibility
+    multishot_level -> ms2, ms3, ms4, etc. (the multishot CSV file to read)
+    --top N         -> number of top prompts to extract per model (default: 10)
+    --output FILE   -> output filename (default: templates_ms{level}.py)
 
 Output:
-    template_multishot_{multishot_number}x{prompt_number}.py
-    containing TEMPLATES_GPT_MULTISHOT and TEMPLATES_GEMMA_MULTISHOT
+    templates_ms{level}.py
+    containing TEMPLATES_GPT and TEMPLATES_GEMMA from the top N CSV rows
 """
 
 import argparse
-import random
+import csv
+import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-try:
-    from sample import TEMPLATES_GPT, TEMPLATES_GEMMA
-except ImportError:
-    print("ERROR: could not import TEMPLATES_GPT / TEMPLATES_GEMMA from sample.py")
-    print("Make sure sample.py is in the same directory as split_multishot.py.")
-    sys.exit(1)
-
-
-def build_candidate(templates, multishot_number, rng):
-    """Pick multishot_number distinct templates -> (combined_name, (turn1, turn2, ...))."""
-    if multishot_number > len(templates):
-        raise ValueError(
-            f"multishot_number={multishot_number} exceeds pool size ({len(templates)})"
-        )
-    picks = rng.sample(list(templates), multishot_number)
-    names = [name for name, _ in picks]
-    turns = tuple(text for _, text in picks)
-    combined_name = "__".join(names)
-    return combined_name, turns
+def parse_prompt_candidate(json_str):
+    """Parse the JSON list of turns from CSV 'Prompt Candidate' column."""
+    try:
+        # The CSV column contains a JSON list of strings
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        print(f"ERROR: Failed to parse JSON from prompt candidate: {json_str[:100]}")
+        raise
 
 
-def build_bank(templates, multishot_number, prompt_number, rng):
-    return [build_candidate(templates, multishot_number, rng) for _ in range(prompt_number)]
+def extract_top_prompts(csv_path, top_n=10):
+    """
+    Read CSV and extract top N prompts.
+    Returns list of (name, turns_tuple) where turns_tuple is a tuple of prompt strings.
+    """
+    prompts = []
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for i, row in enumerate(reader):
+                if i >= top_n:
+                    break
+                
+                # Build a simple name from Prompt ID and Cycle
+                prompt_id = row.get('Prompt ID', f'prompt_{i}')
+                cycle = row.get('Cycle', '1')
+                name = f"prompt_{prompt_id}_cycle_{cycle}"
+                
+                # Parse the JSON prompt candidate
+                candidate_json = row.get('Prompt Candidate', '[]')
+                turns = tuple(parse_prompt_candidate(candidate_json))
+                
+                prompts.append((name, turns))
+        
+        return prompts
+    except FileNotFoundError:
+        print(f"ERROR: CSV file not found: {csv_path}")
+        raise
 
 
 def format_bank(var_name, entries):
+    """Format template entries as Python code."""
     lines = [f"{var_name} = ("]
     for name, turns in entries:
-        lines.append(f"    ({name!r}, (")
+        lines.append(f"    ('{name}', (")
         for turn in turns:
             lines.append(f"        {turn!r},")
         lines.append("    )),")
@@ -73,38 +83,70 @@ def format_bank(var_name, entries):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build multi-turn multishot template banks from sample.py")
-    parser.add_argument("multishot_number", type=int, help="templates combined per multi-turn candidate")
-    parser.add_argument("prompt_number", type=int, help="number of multi-turn candidates to build per model")
-    parser.add_argument("--seed", type=int, default=None)
+    parser = argparse.ArgumentParser(
+        description="Extract top prompts from multishot CSV files and generate .py templates"
+    )
+    parser.add_argument(
+        "multishot_level",
+        help="Multishot level (ms2, ms3, ms4, etc.)"
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=10,
+        help="Number of top prompts to extract per model (default: 10)"
+    )
+    parser.add_argument(
+        "--output",
+        help="Output filename (default: template/templates_ms{level}.py)"
+    )
     args = parser.parse_args()
 
-    if args.multishot_number < 1 or args.prompt_number < 1:
-        print("ERROR: multishot_number and prompt_number must both be >= 1")
+    # Normalize multishot level (ms4 or just 4)
+    ms_level = args.multishot_level.lower()
+    if not ms_level.startswith('ms'):
+        ms_level = f"ms{ms_level}"
+    
+    # Determine output filename
+    if args.output:
+        out_path = Path(args.output)
+    else:
+        out_path = Path(f"templates_{ms_level}.py")
+    
+    # Build CSV file paths (prompts directory)
+    prompts_dir = Path(__file__).resolve().parent / "prompts"
+    gpt_csv = prompts_dir / f"gpt_oss_multishot_{ms_level}_c5_p100_100pct_hits_sorted.csv"
+    gemma_csv = prompts_dir / f"gemma_multishot_{ms_level}_c5_p100_100pct_hits_sorted.csv"
+    
+    print(f"Reading from multishot level: {ms_level}")
+    print(f"GPT CSV: {gpt_csv}")
+    print(f"Gemma CSV: {gemma_csv}")
+    
+    # Extract top prompts
+    try:
+        gpt_prompts = extract_top_prompts(gpt_csv, args.top)
+        gemma_prompts = extract_top_prompts(gemma_csv, args.top)
+    except FileNotFoundError:
         sys.exit(1)
-
-    rng = random.Random(args.seed)
-
-    gpt_bank = build_bank(TEMPLATES_GPT, args.multishot_number, args.prompt_number, rng)
-    gemma_bank = build_bank(TEMPLATES_GEMMA, args.multishot_number, args.prompt_number, rng)
-
-    out_path = Path(f"template_multishot_{args.multishot_number}x{args.prompt_number}.py")
+    
+    # Generate Python code
     content = (
         f'"""\n'
-        f"Auto-generated by split_multishot.py from sample.py\n"
-        f"{args.prompt_number} candidates per model, {args.multishot_number} turns each"
-        f"{f', seed={args.seed}' if args.seed is not None else ''}\n"
+        f"Auto-generated by split.py from multishot CSV files\n"
+        f"Multishot level: {ms_level}\n"
+        f"Top {args.top} prompts per model\n"
         f"\n"
-        f"Each entry: (combined_name, (turn_1, turn_2, ..., turn_N))\n"
-        f"Separate from attack.py's TEMPLATES_GPT/TEMPLATES_GEMMA and\n"
-        f"SETUP_SEQUENCE_* — wire this in yourself as ordered turns.\n"
+        f"Each entry: (name, (turn_1, turn_2, ..., turn_N))\n"
         f'"""\n\n'
-        f"{format_bank('TEMPLATES_GPT_MULTISHOT', gpt_bank)}\n\n"
-        f"{format_bank('TEMPLATES_GEMMA_MULTISHOT', gemma_bank)}\n"
+        f"{format_bank('TEMPLATES_GPT', gpt_prompts)}\n\n"
+        f"{format_bank('TEMPLATES_GEMMA', gemma_prompts)}\n"
     )
-
+    
+    # Write output
     out_path.write_text(content, encoding="utf-8")
-    print(f"Wrote {out_path} ({args.prompt_number} GPT + {args.prompt_number} Gemma multi-turn candidates, {args.multishot_number} turns each)")
+    print(f"\nSuccessfully wrote {out_path}")
+    print(f"  - {len(gpt_prompts)} GPT templates")
+    print(f"  - {len(gemma_prompts)} Gemma templates")
 
 
 if __name__ == "__main__":
