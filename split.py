@@ -2,12 +2,13 @@
 """
 split.py
 
-Extracts top N prompts from multishot CSV files (gpt_oss_multishot_msX_*.csv and
-gemma_multishot_msX_*.csv) and generates .py files with template banks.
+Extracts top N prompts from multishot CSV files (gpt_oss_msX_top100_deduped.csv and
+gemma_msX_top100_deduped.csv) and generates .py files with template banks.
 
 Unlike the old split.py (which sampled randomly from sample.py), this:
 - Reads from the best-performing multishot CSV results
-- Takes the top N prompts (default 10)
+- Takes the top N prompts (default 10) -- files are already sorted best-hit-first,
+  then fastest-time-first, and already deduped/aggregated (one row per Prompt ID)
 - Parses the JSON prompt candidates from the CSV
 - Generates TEMPLATES_GPT and TEMPLATES_GEMMA in .py format
 
@@ -31,7 +32,7 @@ from pathlib import Path
 
 
 def parse_prompt_candidate(json_str):
-    """Parse the JSON list of turns from CSV 'Prompt Candidate' column."""
+    """Parse the JSON list of turns from CSV 'Prompt_Candidate' column."""
     try:
         # The CSV column contains a JSON list of strings
         return json.loads(json_str)
@@ -44,6 +45,9 @@ def extract_top_prompts(csv_path, top_n=10):
     """
     Read CSV and extract top N prompts.
     Returns list of (name, turns_tuple) where turns_tuple is a tuple of prompt strings.
+
+    The CSV is already sorted Mean_Hit_Pct desc, then Mean_Time_s asc, and already
+    deduped/aggregated to one row per Prompt ID -- so the first N rows are the top N.
     """
     prompts = []
     try:
@@ -52,18 +56,18 @@ def extract_top_prompts(csv_path, top_n=10):
             for i, row in enumerate(reader):
                 if i >= top_n:
                     break
-                
-                # Build a simple name from Prompt ID and Cycle
+
+                # Build a simple, unique name from Rank and Prompt ID
+                rank = row.get('Rank', str(i + 1))
                 prompt_id = row.get('Prompt ID', f'prompt_{i}')
-                cycle = row.get('Cycle', '1')
-                name = f"prompt_{prompt_id}_cycle_{cycle}"
-                
+                name = f"prompt_{prompt_id}_rank_{rank}"
+
                 # Parse the JSON prompt candidate
-                candidate_json = row.get('Prompt Candidate', '[]')
+                candidate_json = row.get('Prompt_Candidate', '[]')
                 turns = tuple(parse_prompt_candidate(candidate_json))
-                
+
                 prompts.append((name, turns))
-        
+
         return prompts
     except FileNotFoundError:
         print(f"ERROR: CSV file not found: {csv_path}")
@@ -98,7 +102,7 @@ def main():
     )
     parser.add_argument(
         "--output",
-        help="Output filename (default: template/templates_ms{level}.py)"
+        help="Output filename (default: templates_ms{level}.py)"
     )
     args = parser.parse_args()
 
@@ -106,29 +110,32 @@ def main():
     ms_level = args.multishot_level.lower()
     if not ms_level.startswith('ms'):
         ms_level = f"ms{ms_level}"
-    
+
     # Determine output filename
     if args.output:
         out_path = Path(args.output)
     else:
-        out_path = Path(f"templates_{ms_level}.py")
-    
+        out_path = Path(f"templates/templates_{ms_level}.py")
+
     # Build CSV file paths (prompts directory)
     prompts_dir = Path(__file__).resolve().parent / "prompts"
-    gpt_csv = prompts_dir / f"gpt_oss_multishot_{ms_level}_c5_p100_100pct_hits_sorted.csv"
-    gemma_csv = prompts_dir / f"gemma_multishot_{ms_level}_c5_p100_100pct_hits_sorted.csv"
-    
+
+    # NOTE: these were swapped in the old script (gpt_csv pointed at the gemma file
+    # and vice versa) -- fixed here to match filenames actually on disk.
+    gpt_csv = prompts_dir / f"gpt_oss_{ms_level}_top100_deduped.csv"
+    gemma_csv = prompts_dir / f"gemma_{ms_level}_top100_deduped.csv"
+
     print(f"Reading from multishot level: {ms_level}")
-    print(f"GPT CSV: {gpt_csv}")
+    print(f"GPT-OSS CSV: {gpt_csv}")
     print(f"Gemma CSV: {gemma_csv}")
-    
+
     # Extract top prompts
     try:
         gpt_prompts = extract_top_prompts(gpt_csv, args.top)
         gemma_prompts = extract_top_prompts(gemma_csv, args.top)
     except FileNotFoundError:
         sys.exit(1)
-    
+
     # Generate Python code
     content = (
         f'"""\n'
@@ -141,11 +148,11 @@ def main():
         f"{format_bank('TEMPLATES_GPT', gpt_prompts)}\n\n"
         f"{format_bank('TEMPLATES_GEMMA', gemma_prompts)}\n"
     )
-    
+
     # Write output
     out_path.write_text(content, encoding="utf-8")
     print(f"\nSuccessfully wrote {out_path}")
-    print(f"  - {len(gpt_prompts)} GPT templates")
+    print(f"  - {len(gpt_prompts)} GPT-OSS templates")
     print(f"  - {len(gemma_prompts)} Gemma templates")
 
 
